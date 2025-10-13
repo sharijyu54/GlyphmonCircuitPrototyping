@@ -17,9 +17,8 @@
 <body>
 <div class="wrap">
   <div>
-    <canvas id="canvas"></canvas>
-    <div class="hint">Inputは左詰めスタック。3つ集まると自動で上へ流す</div>
     <div id="score" style="font-size:16px;margin-top:4px;">Score: 0.00</div>
+    <canvas id="canvas"></canvas>
   </div>
   <div>
     <div class="panel">
@@ -31,10 +30,11 @@
 </div>
 
 <script>
-const cols=8,rows=8,cellSize=40;
+const cols=9,rows=9,cellSize=20;
 const spawnInterval=3000,moveInterval=500,rollingWindowSec=10;
 const canvas=document.getElementById("canvas"),ctx=canvas.getContext("2d");
-canvas.width=cols*cellSize+40;canvas.height=rows*cellSize+160;
+canvas.width=cols*cellSize+40;
+canvas.height=rows*cellSize+100;
 const scoreEl=document.getElementById("score");
 
 const ARROWS=['↑','→','↓','←',null];
@@ -106,7 +106,7 @@ function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const x0=20,yOut=20,yGrid=yOut+30,yIn=yGrid+rows*cellSize;
   ctx.fillStyle="rgba(255,70,70,0.2)";ctx.fillRect(x0,yOut,cols*cellSize,30);
-  ctx.fillStyle="rgba(90,160,255,0.2)";ctx.fillRect(x0,yIn,cols*cellSize,40);
+  ctx.fillStyle="rgba(90,160,255,0.2)";ctx.fillRect(x0,yIn,cols*cellSize,30);
   ctx.strokeStyle="rgba(255,255,255,0.15)";
   for(let r=0;r<=rows;r++){ctx.beginPath();ctx.moveTo(x0,r*cellSize+yGrid+.5);ctx.lineTo(x0+cols*cellSize,r*cellSize+yGrid+.5);ctx.stroke();}
   for(let c=0;c<=cols;c++){ctx.beginPath();ctx.moveTo(x0+c*cellSize+.5,yGrid);ctx.lineTo(x0+c*cellSize+.5,yGrid+rows*cellSize);ctx.stroke();}

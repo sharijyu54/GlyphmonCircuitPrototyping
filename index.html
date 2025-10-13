@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Glyphmon Circuit Prototyping</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;background:#0f1220;color:#eee;font-family:system-ui,Meiryo,sans-serif;}
+  .wrap{display:grid;grid-template-columns:auto 200px;gap:8px;padding:8px;height:100vh;box-sizing:border-box;}
+  .panel{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px;}
+  #canvas{display:block;background:rgba(255,255,255,0.02);border-radius:8px;}
+  .tool{user-select:none;background:#2b2f47;border:1px dashed rgba(255,255,255,0.3);border-radius:6px;padding:6px;margin-bottom:6px;display:flex;align-items:center;gap:6px;cursor:grab;}
+  .icon{width:28px;height:28px;border-radius:6px;background:#ffd54f;color:#111;display:grid;place-items:center;font-weight:bold;}
+  .hint{font-size:12px;opacity:.75}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <canvas id="canvas"></canvas>
+    <div class="hint">Inputは左詰めスタック。3つ集まると自動で上へ流す</div>
+    <div id="score" style="font-size:16px;margin-top:4px;">Score: 0.00</div>
+  </div>
+  <div>
+    <div class="panel">
+      <div class="tool" draggable="true" data-item="#"><div class="icon">#</div><div>赤→青</div></div>
+      <div class="tool" draggable="true" data-item="sync"><div class="icon">S</div><div>同期</div></div>
+      <div class="tool" draggable="true" data-item="upsync"><div class="icon">↑</div><div>上流れ</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const cols=8,rows=8,cellSize=40;
+const spawnInterval=3000,moveInterval=500,rollingWindowSec=10;
+const canvas=document.getElementById("canvas"),ctx=canvas.getContext("2d");
+canvas.width=cols*cellSize+40;canvas.height=rows*cellSize+160;
+const scoreEl=document.getElementById("score");
+
+const ARROWS=['↑','→','↓','←',null];
+const ARROW_DIRS={'→':{dx:1,dy:0},'↓':{dx:0,dy:1},'←':{dx:-1,dy:0},'↑':{dx:0,dy:-1}};
+const grid=Array.from({length:rows},()=>Array.from({length:cols},()=>({arrow:null,element:null})));
+
+const COLORS={red:{rgb:[255,70,70],v:-1},green:{rgb:[80,255,150],v:+1},blue:{rgb:[90,160,255],v:+1.5}};
+const signals=[],scoreLog=[];
+let inputStack=[]; // 左詰めで3つまで
+function now(){return performance.now();}
+
+/* syncシステム */
+const pausedSyncSignals=[];
+function onSyncHit(sig){
+  if(pausedSyncSignals.length===0){sig.active=false;sig.paused=true;pausedSyncSignals.push(sig);return 'paused';}
+  else{while(pausedSyncSignals.length){const s=pausedSyncSignals.pop();s.active=true;s.paused=false;}return'released';}
+}
+
+/* 移動 */
+function applyElementsAndMoveInCell(cell,sig){
+  if(cell.element==='#'&&sig.name==='red'){sig.name='blue';sig.color=COLORS.blue.rgb.slice();sig.v=COLORS.blue.v;}
+  if(cell.element==='upsync'){sig.y-=1;return true;}
+  const d=ARROW_DIRS[cell.arrow]||{dx:0,dy:-1};
+  sig.x+=d.dx;sig.y+=d.dy;
+  if(cell.element==='sync'){const r=onSyncHit(sig);if(r==='paused')return true;}
+  return false;
+}
+function move(sig,t){
+  if(!sig.active||(t-sig.lastMove)<moveInterval)return;
+  sig.lastMove=t;
+  if(sig.y===rows){ // Input段にはもはや矢印なし（上流れ専用）
+    sig.y=rows-1;return;
+  }
+  if(sig.y>=0&&sig.y<rows&&sig.x>=0&&sig.x<cols){
+    const c=grid[sig.y][sig.x];
+    if(applyElementsAndMoveInCell(c,sig))return;
+  }
+  if(sig.y<0){scoreLog.push({t,v:sig.v});sig.active=false;}
+  if(sig.x<0||sig.x>=cols||sig.y>rows){sig.active=false;}
+}
+
+/* スコア */
+function rollingScore(t){const c=t-rollingWindowSec*1000;while(scoreLog.length&&scoreLog[0].t<c)scoreLog.shift();
+  return scoreLog.length?scoreLog.reduce((a,b)=>a+b.v,0)/scoreLog.length:0;}
+
+/* スポーン */
+function spawnSignal(){
+  const n=['red','green','blue'][Math.floor(Math.random()*3)],c=COLORS[n];
+  if(inputStack.length<3){
+    inputStack.push({x:inputStack.length,y:rows+1,name:n,color:c.rgb.slice(),v:c.v,active:true,lastMove:0,paused:false});
+  }
+}
+/* スタック上げ */
+function checkInputStackRelease(){
+  if(inputStack.length===3){
+    // 3つ集まったら全て上に移動
+    for(let i=0;i<3;i++){
+      const s=inputStack[i];
+      s.y=rows; // input laneへ
+      s.x=i;    // 左詰め
+      signals.push(s);
+    }
+    inputStack=[];
+  }
+}
+
+/* 描画 */
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const x0=20,yOut=20,yGrid=yOut+30,yIn=yGrid+rows*cellSize;
+  ctx.fillStyle="rgba(255,70,70,0.2)";ctx.fillRect(x0,yOut,cols*cellSize,30);
+  ctx.fillStyle="rgba(90,160,255,0.2)";ctx.fillRect(x0,yIn,cols*cellSize,40);
+  ctx.strokeStyle="rgba(255,255,255,0.15)";
+  for(let r=0;r<=rows;r++){ctx.beginPath();ctx.moveTo(x0,r*cellSize+yGrid+.5);ctx.lineTo(x0+cols*cellSize,r*cellSize+yGrid+.5);ctx.stroke();}
+  for(let c=0;c<=cols;c++){ctx.beginPath();ctx.moveTo(x0+c*cellSize+.5,yGrid);ctx.lineTo(x0+c*cellSize+.5,yGrid+rows*cellSize);ctx.stroke();}
+  ctx.textAlign="center";ctx.textBaseline="middle";ctx.font="bold 14px monospace";
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+    const cell=grid[y][x],cx=x0+x*cellSize+cellSize/2,cy=yGrid+y*cellSize+cellSize/2;
+    if(cell.arrow){ctx.fillStyle="#fff";ctx.fillText(cell.arrow,cx,cy);}
+    if(cell.element){ctx.fillStyle="#ffd54f";ctx.fillRect(cx-10,cy-10,20,20);ctx.fillStyle="#111";ctx.fillText(cell.element==='upsync'?'↑':cell.element==='sync'?'S':'#',cx,cy);}
+  }
+  // 信号描画
+  for(const s of [...signals,...inputStack]){
+    if(!s.active&&!s.paused)continue;
+    let cx=x0+s.x*cellSize+cellSize/2,cy;
+    if(s.y===rows+1)cy=yIn+20; // スタック
+    else if(s.y===rows)cy=yIn; // input lane上段
+    else cy=yGrid+s.y*cellSize+cellSize/2;
+    ctx.beginPath();
+    ctx.fillStyle=`rgb(${s.color[0]},${s.color[1]},${s.color[2]})`;
+    ctx.arc(cx,cy,7,0,Math.PI*2);ctx.fill();
+  }
+}
+
+/* 矢印クリック / D&D */
+canvas.addEventListener("click",e=>{
+  const r=canvas.getBoundingClientRect(),mx=(e.clientX-r.left)*canvas.width/r.width,my=(e.clientY-r.top)*canvas.height/r.height;
+  const x0=20,yOut=20,yGrid=yOut+30;
+  if(mx>=x0&&mx<x0+cols*cellSize&&my>=yGrid&&my<yGrid+rows*cellSize){
+    const gx=Math.floor((mx-x0)/cellSize),gy=Math.floor((my-yGrid)/cellSize);
+    grid[gy][gx].arrow=ARROWS[(ARROWS.indexOf(grid[gy][gx].arrow)+1)%ARROWS.length];
+  }
+});
+const tools=document.querySelectorAll(".tool");
+tools.forEach(t=>t.addEventListener("dragstart",e=>e.dataTransfer.setData("text/plain",t.dataset.item)));
+canvas.addEventListener("dragover",e=>e.preventDefault());
+canvas.addEventListener("drop",e=>{
+  e.preventDefault();const item=e.dataTransfer.getData("text/plain");
+  const r=canvas.getBoundingClientRect(),mx=(e.clientX-r.left)*canvas.width/r.width,my=(e.clientY-r.top)*canvas.height/r.height;
+  const x0=20,yOut=20,yGrid=yOut+30;
+  if(mx>=x0&&mx<x0+cols*cellSize&&my>=yGrid&&my<yGrid+rows*cellSize){
+    const gx=Math.floor((mx-x0)/cellSize),gy=Math.floor((my-yGrid)/cellSize);grid[gy][gx].element=item;
+  }
+});
+
+/* ループ */
+let lastSpawn=0;
+function loop(){
+  const t=now();
+  if(t-lastSpawn>spawnInterval){spawnSignal();lastSpawn=t;}
+  checkInputStackRelease();
+  for(const s of signals)move(s,t);
+  for(let i=signals.length-1;i>=0;i--)if(!signals[i].active&&!signals[i].paused)signals.splice(i,1);
+  draw();
+  scoreEl.textContent="Score: "+rollingScore(t).toFixed(2);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

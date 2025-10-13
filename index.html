@@ -43,6 +43,29 @@ const grid=Array.from({length:rows},()=>Array.from({length:cols},()=>({arrow:nul
 
 const COLORS={red:{rgb:[255,70,70],v:-1},green:{rgb:[80,255,150],v:+1},blue:{rgb:[90,160,255],v:+1.5}};
 const signals=[],scoreLog=[];
+class Signal{
+  constructor({x=0,y=0,color='red',number=1}){
+    this.x=x;
+    this.y=y;
+    this.lastMove=0;
+    this.active=true;
+    this.paused=false;
+    this.number=number;
+    this.vx=0;
+    this.vy=-1;
+    this.color=color;
+  }
+  set color(name){
+    const preset=COLORS[name];
+    if(!preset)throw new Error(`Unknown color: ${name}`);
+    this._color=name;
+    this.rgb=preset.rgb.slice();
+    this.v=preset.v;
+  }
+  get color(){
+    return this._color;
+  }
+}
 let inputStack=[]; // 左詰めで3つまで
 function now(){return performance.now();}
 
@@ -55,22 +78,39 @@ function onSyncHit(sig){
 
 /* 移動 */
 function applyElementsAndMoveInCell(cell,sig){
-  if(cell.element==='#'&&sig.name==='red'){sig.name='blue';sig.color=COLORS.blue.rgb.slice();sig.v=COLORS.blue.v;}
-  if(cell.element==='upsync'){sig.y-=1;return true;}
-  const d=ARROW_DIRS[cell.arrow]||{dx:0,dy:-1};
-  sig.x+=d.dx;sig.y+=d.dy;
-  if(cell.element==='sync'){const r=onSyncHit(sig);if(r==='paused')return true;}
-  return false;
+  if(cell.element==='#'&&sig.color==='red'){sig.color='blue';}
+  if(cell.element==='upsync'){
+    sig.vx=0;
+    sig.vy=-1;
+    sig.y-=1;
+    return 'handled';
+  }
+  if(cell.arrow){
+    const d=ARROW_DIRS[cell.arrow];
+    if(d){sig.vx=d.dx;sig.vy=d.dy;}
+  }
+  sig.x+=sig.vx;
+  sig.y+=sig.vy;
+  if(cell.element==='sync'){
+    const r=onSyncHit(sig);
+    if(r==='paused')return 'paused';
+  }
+  return 'moved';
 }
 function move(sig,t){
   if(!sig.active||(t-sig.lastMove)<moveInterval)return;
   sig.lastMove=t;
-  if(sig.y===rows){ // Input段にはもはや矢印なし（上流れ専用）
-    sig.y=rows-1;return;
+  if(sig.y===rows){
+    sig.y=rows-1;
+    return;
   }
   if(sig.y>=0&&sig.y<rows&&sig.x>=0&&sig.x<cols){
     const c=grid[sig.y][sig.x];
-    if(applyElementsAndMoveInCell(c,sig))return;
+    const result=applyElementsAndMoveInCell(c,sig);
+    if(result==='handled'||result==='paused')return;
+  }else{
+    sig.x+=sig.vx;
+    sig.y+=sig.vy;
   }
   if(sig.y<0){scoreLog.push({t,v:sig.v});sig.active=false;}
   if(sig.x<0||sig.x>=cols||sig.y>rows){sig.active=false;}
@@ -82,9 +122,10 @@ function rollingScore(t){const c=t-rollingWindowSec*1000;while(scoreLog.length&&
 
 /* スポーン */
 function spawnSignal(){
-  const n=['red','green','blue'][Math.floor(Math.random()*3)],c=COLORS[n];
+  const n=['red','green','blue'][Math.floor(Math.random()*3)];
+  const num=Math.floor(Math.random()*9)+1;
   if(inputStack.length<3){
-    inputStack.push({x:inputStack.length,y:rows+1,name:n,color:c.rgb.slice(),v:c.v,active:true,lastMove:0,paused:false});
+    inputStack.push(new Signal({x:inputStack.length,y:rows+1,color:n,number:num}));
   }
 }
 /* スタック上げ */
@@ -95,6 +136,8 @@ function checkInputStackRelease(){
       const s=inputStack[i];
       s.y=rows; // input laneへ
       s.x=i;    // 左詰め
+      s.vx=0;
+      s.vy=-1;
       signals.push(s);
     }
     inputStack=[];
@@ -105,6 +148,14 @@ function checkInputStackRelease(){
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const x0=20,yOut=20,yGrid=yOut+30,yIn=yGrid+rows*cellSize;
+  const pointToCanvas=(px,py)=>{
+    const cx=x0+px*cellSize+cellSize/2;
+    if(py===rows+1)return{x:cx,y:yIn+20};
+    if(py===rows)return{x:cx,y:yIn};
+    if(py<0)return{x:cx,y:yOut};
+    if(py>rows)return{x:cx,y:yIn+30};
+    return{x:cx,y:yGrid+py*cellSize+cellSize/2};
+  };
   ctx.fillStyle="rgba(255,70,70,0.2)";ctx.fillRect(x0,yOut,cols*cellSize,30);
   ctx.fillStyle="rgba(90,160,255,0.2)";ctx.fillRect(x0,yIn,cols*cellSize,30);
   ctx.strokeStyle="rgba(255,255,255,0.15)";
@@ -116,6 +167,91 @@ function draw(){
     if(cell.arrow){ctx.fillStyle="#fff";ctx.fillText(cell.arrow,cx,cy);}
     if(cell.element){ctx.fillStyle="#ffd54f";ctx.fillRect(cx-10,cy-10,20,20);ctx.fillStyle="#111";ctx.fillText(cell.element==='upsync'?'↑':cell.element==='sync'?'S':'#',cx,cy);}
   }
+  // 矢印に基づく回路ライン
+  ctx.save();
+  ctx.lineWidth=3;
+  ctx.lineJoin="round";
+  ctx.lineCap="round";
+  ctx.strokeStyle="rgba(180,180,200,0.45)";
+  const advance=cellSize*0.5;
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const cell=grid[y][x];
+      const dir=ARROW_DIRS[cell.arrow];
+      if(!dir)continue;
+      const start=pointToCanvas(x,y);
+      const nx=x+dir.dx,ny=y+dir.dy;
+      let end;
+      if(ny>=0&&ny<rows&&nx>=0&&nx<cols){
+        end=pointToCanvas(nx,ny);
+      }else{
+        end={x:start.x+dir.dx*advance,y:start.y+dir.dy*advance};
+      }
+      ctx.beginPath();
+      ctx.moveTo(start.x,start.y);
+      ctx.lineTo(end.x,end.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+  // 入力レーンからの経路を描画
+  const simulatePathFromInput=x=>{
+    const pts=[];
+    let cxCell=x;
+    let cyCell=rows;
+    let dir={dx:0,dy:-1};
+    const visited=new Set();
+    const maxSteps=cols*rows*2;
+    let loopDetected=false;
+    const addPoint=(x,y)=>{
+      const last=pts[pts.length-1];
+      if(!last||last.rawX!==x||last.rawY!==y){
+        const canvasPoint=pointToCanvas(x,y);
+        canvasPoint.rawX=x;
+        canvasPoint.rawY=y;
+        pts.push(canvasPoint);
+      }
+    };
+    addPoint(cxCell,cyCell);
+    for(let step=0;step<maxSteps;step++){
+      const state=`${cxCell},${cyCell},${dir.dx},${dir.dy}`;
+      if(visited.has(state)){loopDetected=true;break;}
+      visited.add(state);
+      const nx=cxCell+dir.dx;
+      const ny=cyCell+dir.dy;
+      addPoint(nx,ny);
+      cxCell=nx;
+      cyCell=ny;
+      if(ny<0||ny>rows||nx<0||nx>=cols)break;
+      if(ny===rows){
+        dir={dx:0,dy:-1};
+        continue;
+      }
+      const cell=grid[ny][nx];
+      if(cell&&cell.arrow){
+        const d=ARROW_DIRS[cell.arrow];
+        if(d){dir=d;}
+      }
+    }
+    if(loopDetected&&pts.length>1)pts.pop();
+    return pts;
+  };
+  ctx.save();
+  ctx.lineWidth=3;
+  ctx.lineJoin="round";
+  ctx.lineCap="round";
+  ctx.strokeStyle="rgba(160,160,170,0.6)";
+  for(let x=0;x<cols;x++){
+    const pts=simulatePathFromInput(x);
+    if(pts.length<2)continue;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length;i++){
+      ctx.lineTo(pts[i].x,pts[i].y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
   // 信号描画
   for(const s of [...signals,...inputStack]){
     if(!s.active&&!s.paused)continue;
@@ -124,8 +260,15 @@ function draw(){
     else if(s.y===rows)cy=yIn; // input lane上段
     else cy=yGrid+s.y*cellSize+cellSize/2;
     ctx.beginPath();
-    ctx.fillStyle=`rgb(${s.color[0]},${s.color[1]},${s.color[2]})`;
+    ctx.fillStyle=`rgb(${s.rgb[0]},${s.rgb[1]},${s.rgb[2]})`;
     ctx.arc(cx,cy,7,0,Math.PI*2);ctx.fill();
+    if(s.number!==undefined&&s.number!==null){
+      ctx.fillStyle="#111";
+      ctx.font="bold 10px monospace";
+      ctx.textAlign="center";
+      ctx.textBaseline="middle";
+      ctx.fillText(String(s.number),cx,cy);
+    }
   }
 }
 

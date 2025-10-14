@@ -1,0 +1,51 @@
+html,body{
+  margin:0;
+  background:#0f1220;
+  color:#eee;
+  font-family:system-ui,Meiryo,sans-serif;
+}
+.wrap{
+  display:grid;
+  grid-template-columns:auto 200px;
+  gap:8px;
+  padding:8px;
+  height:100vh;
+  box-sizing:border-box;
+}
+.panel{
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.1);
+  border-radius:8px;
+  padding:8px;
+}
+#canvas{
+  display:block;
+  background:rgba(255,255,255,0.02);
+  border-radius:8px;
+}
+.tool{
+  user-select:none;
+  background:#2b2f47;
+  border:1px dashed rgba(255,255,255,0.3);
+  border-radius:6px;
+  padding:6px;
+  margin-bottom:6px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  cursor:grab;
+}
+.icon{
+  width:28px;
+  height:28px;
+  border-radius:6px;
+  background:#ffd54f;
+  color:#111;
+  display:grid;
+  place-items:center;
+  font-weight:bold;
+}
+.hint{
+  font-size:12px;
+  opacity:.75;
+}

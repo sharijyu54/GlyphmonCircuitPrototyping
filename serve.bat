@@ -8,7 +8,7 @@ rem py があれば優先、なければ python
 where py >nul 2>nul && (set "PYTHON=py -3") || (set "PYTHON=python")
 
 echo Starting server on http://localhost:%PORT%/
-start "" "http://localhost:%PORT%/index.html"
+start "" "http://localhost:%PORT%/public/index.html"
 %PYTHON% -m http.server %PORT%
 
 popd

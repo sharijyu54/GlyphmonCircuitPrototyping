@@ -1,0 +1,30 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Glyphmon Circuit Prototyping</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <div id="score" style="font-size:16px;margin-top:4px;">Score: 0.00</div>
+    <canvas id="canvas"></canvas>
+  </div>
+  <div class="toolbox">
+    <div class="tool" draggable="true" data-item="#"><div class="icon">#</div><div>Convert</div></div>
+    <div class="tool" draggable="true" data-item="sync"><div class="icon">S</div><div>Sync</div></div>
+    <div class="tool" draggable="true" data-item="pause1"><div class="icon icon--pause"><span class="icon-arrow">↑</span><span class="icon-num">1</span></div><div>Pause 1</div></div>
+    <div class="tool" draggable="true" data-item="pause2"><div class="icon icon--pause"><span class="icon-arrow">↑</span><span class="icon-num">2</span></div><div>Pause 2</div></div>
+    <div class="tool" draggable="true" data-item="pause3"><div class="icon icon--pause"><span class="icon-arrow">↑</span><span class="icon-num">3</span></div><div>Pause 3</div></div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
+
+
+
+

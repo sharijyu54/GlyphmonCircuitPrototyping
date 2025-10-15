@@ -1,4 +1,4 @@
-html,body{
+﻿html,body{
   margin:0;
   background:#0f1220;
   color:#eee;
@@ -6,17 +6,20 @@ html,body{
 }
 .wrap{
   display:grid;
-  grid-template-columns:auto 200px;
-  gap:8px;
-  padding:8px;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:12px;
+  padding:12px;
   height:100vh;
   box-sizing:border-box;
+  align-items:start;
 }
-.panel{
+.toolbox{
   background:rgba(255,255,255,0.05);
   border:1px solid rgba(255,255,255,0.1);
   border-radius:8px;
   padding:8px;
+  width:190px;
+  margin-left:auto;
 }
 #canvas{
   display:block;
@@ -35,6 +38,9 @@ html,body{
   gap:6px;
   cursor:grab;
 }
+.tool:last-child{
+  margin-bottom:0;
+}
 .icon{
   width:28px;
   height:28px;
@@ -44,6 +50,26 @@ html,body{
   display:grid;
   place-items:center;
   font-weight:bold;
+}
+.icon--pause{
+  position:relative;
+  background:#4e82ff;
+  color:#fff;
+  border-radius:999px;
+  width:30px;
+  height:30px;
+  font-weight:600;
+}
+.icon--pause .icon-arrow{
+  font-size:18px;
+  line-height:1;
+}
+.icon--pause .icon-num{
+  position:absolute;
+  bottom:2px;
+  right:4px;
+  font-size:10px;
+  font-weight:700;
 }
 .hint{
   font-size:12px;

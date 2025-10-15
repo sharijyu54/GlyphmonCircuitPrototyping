@@ -12,18 +12,24 @@
     <div id="score" style="font-size:16px;margin-top:4px;">Score: 0.00</div>
     <canvas id="canvas"></canvas>
   </div>
-  <div>
-    <div class="panel">
-      <div class="tool" draggable="true" data-item="#"><div class="icon">#</div><div>赤→青</div></div>
-      <div class="tool" draggable="true" data-item="sync"><div class="icon">S</div><div>同期</div></div>
-      <div class="tool" draggable="true" data-item="upsync"><div class="icon">↑</div><div>上流れ</div></div>
-    </div>
+  <div class="toolbox">
+    <div class="tool" draggable="true" data-item="#"><div class="icon">#</div><div>Convert</div></div>
+    <div class="tool" draggable="true" data-item="sync"><div class="icon">S</div><div>Sync</div></div>
+    <div class="tool" draggable="true" data-item="pause1"><div class="icon icon--pause"><span class="icon-arrow">↑</span><span class="icon-num">1</span></div><div>Pause 1</div></div>
+    <div class="tool" draggable="true" data-item="pause2"><div class="icon icon--pause"><span class="icon-arrow">↑</span><span class="icon-num">2</span></div><div>Pause 2</div></div>
+    <div class="tool" draggable="true" data-item="pause3"><div class="icon icon--pause"><span class="icon-arrow">↑</span><span class="icon-num">3</span></div><div>Pause 3</div></div>
   </div>
 </div>
 
-<script>
-const cols=9,rows=9,cellSize=36;
-const spawnInterval=2000,moveInterval=500,rollingWindowSec=10;
+<script type="module">
+import { Renderer } from './Renderer.js';
+
+const cols=9,rows=9,cellSize=32;
+const tickInterval=500, rollingWindowSec=10;
+let last = performance.now();
+let accumulated = 0;
+let running = true;
+
 const canvas=document.getElementById("canvas"),ctx=canvas.getContext("2d");
 const BOARD_MARGIN=40;
 canvas.width=cols*cellSize+BOARD_MARGIN*2;
@@ -33,6 +39,14 @@ const scoreEl=document.getElementById("score");
 const ARROWS=['↑','→','↓','←',null];
 const ARROW_DIRS={'→':{dx:1,dy:0},'↓':{dx:0,dy:1},'←':{dx:-1,dy:0},'↑':{dx:0,dy:-1}};
 const grid=Array.from({length:rows},()=>Array.from({length:cols},()=>({arrow:null,element:null})));
+const renderer = new Renderer({
+  canvas,
+  config: { cols, rows, cellSize, margin: BOARD_MARGIN },
+  services: { arrowDirs: ARROW_DIRS }
+});
+function renderFrame(){
+  renderer.render({ grid, signals, inputStack });
+}
 
 const COLORS={red:{rgb:[255,70,70],v:-1},green:{rgb:[80,255,150],v:+1},blue:{rgb:[90,160,255],v:+1.5}};
 const signals=[],scoreLog=[];
@@ -42,10 +56,10 @@ class Signal{
     this.y=y;
     this.lastMove=0;
     this.active=true;
-    this.paused=false;
     this.number=number;
     this.vx=0;
     this.vy=-1;
+    this.pauseTimer=0;
     this.color=color;
   }
   set color(name){
@@ -59,75 +73,69 @@ class Signal{
     return this._color;
   }
 }
+
 let inputStack=[]; // 左詰めで3つまで
 function now(){return performance.now();}
 
 /* syncシステム */
 const pausedSyncSignals=[];
 function onSyncHit(sig){
-  if(pausedSyncSignals.length===0){sig.active=false;sig.paused=true;pausedSyncSignals.push(sig);return 'paused';}
+  if(pausedSyncSignals.length===0){sig.active=false;pausedSyncSignals.push(sig);return 'paused';}
   else{while(pausedSyncSignals.length){const s=pausedSyncSignals.pop();s.active=true;s.paused=false;}return'released';}
 }
 
 /* 移動 */
 function applyElementsAndMoveInCell(cell,sig){
-  if(cell.element==='#'&&sig.color==='red'){sig.color='blue';}
-  if(cell.element==='upsync'){
-    sig.vx=0;
-    sig.vy=-1;
-    sig.y-=1;
-    return 'handled';
+  if(cell.element==='#'&&sig.color==='red'){
+    sig.color='blue';
+  }
+  const pauseMatch=cell.element&&cell.element.startsWith('pause')?Number(cell.element.slice(5)):null;
+  if(pauseMatch){
+    if (sig.pauseTimer<=0)
+    {
+      sig.pauseTimer=pauseMatch;
+    }
+    else {
+      sig.pauseTimer--;
+    }
   }
   if(cell.arrow){
     const d=ARROW_DIRS[cell.arrow];
     if(d){sig.vx=d.dx;sig.vy=d.dy;}
   }
-  sig.x+=sig.vx;
-  sig.y+=sig.vy;
-  if(cell.element==='sync'){
-    const r=onSyncHit(sig);
-    if(r==='paused')return 'paused';
+  if (sig.pauseTimer<=0)
+  {
+    sig.x+=sig.vx;
+    sig.y+=sig.vy;
   }
-  return 'moved';
 }
-function move(sig,t){
-  if(!sig.active||(t-sig.lastMove)<moveInterval)return;
-  sig.lastMove=t;
-  if(sig.y===rows){
-    sig.y=rows-1;
-    return;
-  }
+function move(sig){
   if(sig.y>=0&&sig.y<rows&&sig.x>=0&&sig.x<cols){
     const c=grid[sig.y][sig.x];
-    const result=applyElementsAndMoveInCell(c,sig);
-    if(result==='handled'||result==='paused')return;
+    applyElementsAndMoveInCell(c,sig);
   }else{
     sig.x+=sig.vx;
     sig.y+=sig.vy;
   }
-  if(sig.y<0){scoreLog.push({t,v:sig.v});sig.active=false;}
-  if(sig.x<0||sig.x>=cols||sig.y>rows){sig.active=false;}
+  if(sig.pauseCell&&(sig.x!==sig.pauseCell.x||sig.y!==sig.pauseCell.y))sig.pauseCell=null;
+  if(sig.x<0||sig.x>=cols||sig.y>rows||sig.y<-1){sig.active=false;}
 }
 
-/* スコア */
-function rollingScore(t){const c=t-rollingWindowSec*1000;while(scoreLog.length&&scoreLog[0].t<c)scoreLog.shift();
-  return scoreLog.length?scoreLog.reduce((a,b)=>a+b.v,0)/scoreLog.length:0;}
-
-/* スポーン */
-function spawnSignal(){
-  const n=['red','green','blue'][Math.floor(Math.random()*3)];
+  function spawnSignal(){
+  const c=['red','green','blue'][Math.floor(Math.random()*3)];
   const num=Math.floor(Math.random()*9)+1;
   if(inputStack.length<3){
-    inputStack.push(new Signal({x:inputStack.length,y:rows+1,color:n,number:num}));
+    inputStack.push(new Signal({x:inputStack.length,y:rows,color:c,number:num}));
   }
 }
-/* スタック上げ */
+
+// called when input stack overflow
 function checkInputStackRelease(){
   if(inputStack.length===3){
     // 3つ集まったら全て上に移動
     for(let i=0;i<3;i++){
       const s=inputStack[i];
-      s.y=rows; // input laneへ
+      s.y=rows-1; // input laneへ
       s.x=i;    // 左詰め
       s.vx=0;
       s.vy=-1;
@@ -137,137 +145,15 @@ function checkInputStackRelease(){
   }
 }
 
-/* 描画 */
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  const x0=BOARD_MARGIN;
-  const yOutput=BOARD_MARGIN;
-  const yGrid=yOutput+cellSize;
-  const yInput=yGrid+rows*cellSize;
-  const yStack=yInput+cellSize;
-  const pointToCanvas=(px,py)=>{
-    const cx=x0+px*cellSize+cellSize/2;
-    if(py===rows+1)return{x:cx,y:yStack+cellSize/2};
-    if(py===rows)return{x:cx,y:yInput+cellSize/2};
-    if(py<0)return{x:cx,y:yOutput+cellSize/2};
-    if(py>rows)return{x:cx,y:yStack+cellSize/2};
-    return{x:cx,y:yGrid+py*cellSize+cellSize/2};
-  };
-  ctx.fillStyle="rgba(255,70,70,0.1)";
-  ctx.fillRect(x0,yOutput,cols*cellSize,cellSize);
-  ctx.fillStyle="rgba(90,160,255,0.1)";
-  ctx.fillRect(x0,yInput,cols*cellSize,cellSize);
-  ctx.strokeStyle="rgba(255,255,255,0.15)";
-  ctx.lineWidth=1;
-  for(let r=0;r<=rows;r++){
-    const y=yGrid+r*cellSize+.5;
-    ctx.beginPath();
-    ctx.moveTo(x0,y);
-    ctx.lineTo(x0+cols*cellSize,y);
-    ctx.stroke();
-  }
-  for(let c=0;c<=cols;c++){
-    const x=x0+c*cellSize+.5;
-    ctx.beginPath();
-    ctx.moveTo(x,yGrid);
-    ctx.lineTo(x,yGrid+rows*cellSize);
-    ctx.stroke();
-  }
-  ctx.textAlign="center";
-  ctx.textBaseline="middle";
-  ctx.font=`bold ${Math.max(16,cellSize*0.45)}px monospace`;
-  for(let y=0;y<rows;y++){
-    for(let x=0;x<cols;x++){
-      const cell=grid[y][x];
-      const cx=x0+x*cellSize+cellSize/2;
-      const cy=yGrid+y*cellSize+cellSize/2;
-      if(cell.arrow){
-        ctx.fillStyle="#f8f8ff";
-        ctx.fillText(cell.arrow,cx,cy);
-      }
-      if(cell.element){
-        const size=cellSize*0.5;
-        ctx.fillStyle="#ffd54f";
-        ctx.fillRect(cx-size/2,cy-size/2,size,size);
-        ctx.fillStyle="#111";
-        ctx.fillText(cell.element==='upsync'?'↑':cell.element==='sync'?'S':'#',cx,cy);
-      }
-    }
-  }
-  const simulatePathFromInput=x=>{
-    const pts=[];
-    let cxCell=x;
-    let cyCell=rows;
-    let dir={dx:0,dy:-1};
-    const visited=new Set();
-    const maxSteps=cols*rows*2;
-    let loopDetected=false;
-    const addPoint=(px,py)=>{
-      const last=pts[pts.length-1];
-      if(!last||last.rawX!==px||last.rawY!==py){
-        const canvasPoint=pointToCanvas(px,py);
-        canvasPoint.rawX=px;
-        canvasPoint.rawY=py;
-        pts.push(canvasPoint);
-      }
-    };
-    addPoint(cxCell,cyCell);
-    for(let step=0;step<maxSteps;step++){
-      const state=`${cxCell},${cyCell},${dir.dx},${dir.dy}`;
-      if(visited.has(state)){loopDetected=true;break;}
-      visited.add(state);
-      const nx=cxCell+dir.dx;
-      const ny=cyCell+dir.dy;
-      addPoint(nx,ny);
-      cxCell=nx;
-      cyCell=ny;
-      if(ny<0||ny>rows||nx<0||nx>=cols)break;
-      if(ny===rows){
-        dir={dx:0,dy:-1};
-        continue;
-      }
-      const cell=grid[ny][nx];
-      if(cell&&cell.arrow){
-        const d=ARROW_DIRS[cell.arrow];
-        if(d){dir=d;}
-      }
-    }
-    if(loopDetected&&pts.length>1)pts.pop();
-    return pts;
-  };
-  ctx.save();
-  ctx.lineWidth=3;
-  ctx.lineJoin="round";
-  ctx.lineCap="round";
-  ctx.strokeStyle="rgba(160,160,170,0.6)";
-  for(let x=0;x<cols;x++){
-    const pts=simulatePathFromInput(x);
-    if(pts.length<2)continue;
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x,pts[0].y);
-    for(let i=1;i<pts.length;i++){
-      ctx.lineTo(pts[i].x,pts[i].y);
-    }
-    ctx.stroke();
-  }
-  ctx.restore();
-  for(const s of [...signals,...inputStack]){
-    if(!s.active&&!s.paused)continue;
-    const pos=pointToCanvas(s.x,s.y);
-    ctx.beginPath();
-    ctx.fillStyle="rgb("+s.rgb[0]+","+s.rgb[1]+","+s.rgb[2]+")";
-    ctx.arc(pos.x,pos.y,cellSize*0.25,0,Math.PI*2);
-    ctx.fill();
-    if(s.number!==undefined&&s.number!==null){
-      ctx.fillStyle="#111";
-      ctx.font="bold "+Math.max(14,cellSize*0.35)+"px monospace";
-      ctx.textAlign="center";
-      ctx.textBaseline="middle";
-      ctx.fillText(String(s.number),pos.x,pos.y);
-    }
-  }}
+// update logic
+function update(){
+  for (const s of signals) move(s);
+  // spawn signals
+  spawnSignal();
+  checkInputStackRelease();
+}
 
-/* 矢印クリック / D&D */
+// 矢印クリック
 canvas.addEventListener("click",e=>{
   const r=canvas.getBoundingClientRect(),mx=(e.clientX-r.left)*canvas.width/r.width,my=(e.clientY-r.top)*canvas.height/r.height;
   const x0=BOARD_MARGIN,yGrid=BOARD_MARGIN+cellSize;
@@ -276,6 +162,7 @@ canvas.addEventListener("click",e=>{
     grid[gy][gx].arrow=ARROWS[(ARROWS.indexOf(grid[gy][gx].arrow)+1)%ARROWS.length];
   }
 });
+// D&D
 const tools=document.querySelectorAll(".tool");
 tools.forEach(t=>t.addEventListener("dragstart",e=>e.dataTransfer.setData("text/plain",t.dataset.item)));
 canvas.addEventListener("dragover",e=>e.preventDefault());
@@ -288,19 +175,23 @@ canvas.addEventListener("drop",e=>{
   }
 });
 
-/* ループ */
-let lastSpawn=0;
-function loop(){
-  const t=now();
-  if(t-lastSpawn>spawnInterval){spawnSignal();lastSpawn=t;}
-  checkInputStackRelease();
-  for(const s of signals)move(s,t);
-  for(let i=signals.length-1;i>=0;i--)if(!signals[i].active&&!signals[i].paused)signals.splice(i,1);
-  draw();
-  scoreEl.textContent="Score: "+rollingScore(t).toFixed(2);
-  requestAnimationFrame(loop);
+function frame(now){
+  accumulated += now - last;
+  last = now;
+
+  while (accumulated >= tickInterval) {
+    update();
+    accumulated -= tickInterval;
+  }
+ renderFrame();
+
+  if (running) requestAnimationFrame(frame);
 }
-requestAnimationFrame(loop);
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
+
+
+
+
